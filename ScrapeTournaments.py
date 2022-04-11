@@ -1,3 +1,4 @@
+import os
 from time import sleep
 import random
 from bs4 import BeautifulSoup
@@ -6,10 +7,10 @@ from selenium.common.exceptions import NoSuchElementException, ElementNotInterac
 from selenium.webdriver.common.by import By
 import googlemaps
 import csv
-from os.path import exists
+import os
 
 
-gmaps = googlemaps.Client(key='AIzaSyD_LySOPjfrx0Bl_2wxyxGN6HBJ2p4Hqqw')
+gmaps = googlemaps.Client(os.getenv('GMAP_API_KEY'))
 geocodes = {}
 info_window_dict = {}
 
