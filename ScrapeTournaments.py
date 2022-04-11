@@ -6,11 +6,12 @@ from selenium.common.exceptions import NoSuchElementException, ElementNotInterac
 from selenium.webdriver.common.by import By
 import googlemaps
 import csv
+from os.path import exists
 
 
 gmaps = googlemaps.Client(key='AIzaSyD_LySOPjfrx0Bl_2wxyxGN6HBJ2p4Hqqw')
 geocodes = {}
-
+info_window_dict = {}
 
 def rand_sleep(avg, plus_or_minus):
     sleep4 = avg + 2*plus_or_minus*random.uniform(0, 1) - plus_or_minus
@@ -20,16 +21,39 @@ def rand_sleep(avg, plus_or_minus):
 # Create the info_window text
 def create_info_window(tournaments):
     for t in tournaments:
-        iw = '<p>' + t['name'] + "<br />" + t['date'] + "<br />" + \
-                           '<a href=https://www.' + \
-                            t['web_source'] + '.com ' + \
-                           'target=' + \
-                            '"' + '_blank' + '">' + \
-                            t['web_source'] + '</a>' + \
-                            '<br />' + t['tournament_state'] + \
-                            '</p>'
-        t['info_window'] = iw
+        # Initialize all by indicating they are not to be deleted
+        t['tbd'] = False
 
+    for t in tournaments:
+        iw = '<p>' + t['name'] + "<br />" + t['date'] + "<br />" + '<a href=https://www.' + t['web_source'] + '.com ' + \
+                          'target=' + '"' + '_blank' + '">' + t['web_source'] + '</a>' + \
+                           '<br />' + t['tournament_state'] + '</p>'
+        # Now, check to see if we already processed a tournament with this address
+        if t['formatted_address'] in info_window_dict:
+            # First, remove the previous tournament so we don't get two pins
+            for ot in tournaments:
+                if ot['formatted_address'] == t['formatted_address']:
+                    # If it's already been marked for deletion, find the next one
+                    if ot['tbd']:
+                        continue
+                    else:
+                        # Mark it for deletion
+                        ot['tbd'] = True
+                        break
+            # Next, create the entry with all the info
+            t['info_window'] = iw + info_window_dict[t['formatted_address']]
+            info_window_dict[t['formatted_address']] = t['info_window']
+        else:
+            # Simply add the iw content to the tournament
+            t['info_window'] = iw
+            # ...and add it to the dictionary in case there is another tournament with the same address
+            info_window_dict[t['formatted_address']] = iw
+
+    # Now go through and remove all the tournaments that were marked for deletion
+    for t in reversed(tournaments):
+        if t['tbd']:
+            tournaments.remove(t)
+    return
 
 # Reads in all of the geocode results from past searches.
 def read_geocodes():
@@ -75,16 +99,50 @@ def my_geocode(location):
     return geodata
 
 
+def write_tournaments(tournaments, csv_file):
+    csv_columns = ['name', 'date', 'unformatted_address', 'formatted_address', 'lat', 'lng', 'web_source',
+                   'info_window', 'tournament_state', 'tbd']
+    # Now write the csv file so we don't need to do all that work every time
+    try:
+        with open(csv_file, 'w') as csvfile:
+            writer = csv.DictWriter(csvfile, fieldnames=csv_columns)
+            writer.writeheader()
+            writer.writerows(tournaments)
+    except IOError:
+        print("I/O error")
+    return
+
 def get_tournaments():
     # Get cached geocoding results
     read_geocodes()
 
+    # The following block of code is useful during debugging. After an initial scrape, the list of tournaments can
+    # be written out to a file that is read in during subsequent debugging sessions, eliminating the need for
+    # time consuming scrapes
+
+    # csv_file = "Tournaments1.csv"
+    # csv_columns = ['name', 'date', 'unformatted_address', 'formatted_address', 'lat', 'lng', 'web_source',
+    #                'info_window', 'tournament_state', 'tbd']
+    # tournaments = []
+    #
+    # # If the file exists, read in the contents and return them
+    # if exists(csv_file):
+    #     input_file = csv.DictReader(open(csv_file))
+    #     # Convert strings to floats for lat/lng
+    #     for row in input_file:
+    #         row['lat'] = float(row['lat'])
+    #         row['lng'] = float(row['lng'])
+    #         tournaments.append(row)
+    #     create_info_window(tournaments)  # Create the info_window text
+    #     write_tournaments(tournaments, 'Tournaments.csv')
+    #     return tournaments
+    # else:
+    #     print(csv_file, ' not found')
+
     # This routine scrapes PickleballBrackets.com and PickleballBrackets.com creates a list of tournaments
     # Each tournament is a dictionary
     # The tournaments are written to a csv file
-    csv_file = "Tournaments.csv"
-    csv_columns = ['name', 'date', 'unformatted_address', 'formatted_address', 'lat', 'lng', 'web_source',
-                   'info_window', 'tournament_state']
+
     tournaments = []
 
     # Scrape PickleballTournaments.com
@@ -116,7 +174,7 @@ def get_tournaments():
             ostr = name + 'has no location' + location
             print(ostr)
             continue
-        tl_date = tl.find("p", class_="tourney-date")
+        tl_date = row.find("p", class_="tourney-date")
         date = tl_date.text.strip()  # strip removes \nl
 
         # Get lat, lng, formatted address from cached geocodes or from Google geocode
@@ -126,7 +184,7 @@ def get_tournaments():
             tournament_state = 'Registration is closed'
         if row.find("p", class_="soon-date") is not None:
             soon_date = row.find("p", class_="soon-date").text
-            tournament_state = 'Registration will open on ' + soon_date
+            tournament_state = 'Registration ' + soon_date
         if row.find("p", class_="open") is not None:
             reg_link = row.find("p", class_="open").find("a").text
             tournament_state = 'Registration is open'
@@ -141,7 +199,8 @@ def get_tournaments():
                 'lng': geodata[0]["geometry"]["location"]["lng"],
                 'web_source': 'PickleballTournaments',
                 'info_window': '',
-                'tournament_state': tournament_state
+                'tournament_state': tournament_state,
+                'tbd': False
             }
             tournaments.append(tournament_dict)
         else:
@@ -198,21 +257,16 @@ def get_tournaments():
                 'lng': geodata[0]["geometry"]["location"]["lng"],
                 'web_source': 'PickleballBrackets',
                 'info_window': '',
-                'tournament_state': tournament_state
+                'tournament_state': tournament_state,
+                'tbd': False
             }
             tournaments.append(tournament_dict)
         else:
             print('Geocode failed with location = ', location)
-
+    # The following line of code is useful during debugging and should be uncommented in conjunction with the block of
+    # code at the top of this routine
+    # write_tournaments(tournaments, 'Tournaments1.csv')
     create_info_window(tournaments)  # Create the info_window text
-
-    # Now write the csv file so we don't need to do all that work every time
-    try:
-        with open(csv_file, 'w') as csvfile:
-            writer = csv.DictWriter(csvfile, fieldnames=csv_columns)
-            writer.writeheader()
-            writer.writerows(tournaments)
-    except IOError:
-        print("I/O error")
+    write_tournaments(tournaments, 'Tournaments.csv')
 
     return
