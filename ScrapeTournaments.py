@@ -267,6 +267,16 @@ def get_tournaments():
     # The following line of code is useful during debugging and should be uncommented in conjunction with the block of
     # code at the top of this routine
     # write_tournaments(tournaments, 'Tournaments1.csv')
+
+    # Handle known exceptions
+    for t in tournaments:
+        if t['name'] == 'Naples Pickleball Fun Festival 50+ Round Robin Tournament':
+            t['unformatted_address'] = 'East Naples Community Park, Naples, FL, United States'
+            geodata = my_geocode(t['unformatted_address'])
+            t['lat'] = geodata[0]["geometry"]["location"]["lat"]
+            t['lng'] = geodata[0]["geometry"]["location"]["lng"]
+            t['formatted_address'] = geodata[0]["formatted_address"]
+
     create_info_window(tournaments)  # Create the info_window text
     write_tournaments(tournaments, 'Tournaments.csv')
 
