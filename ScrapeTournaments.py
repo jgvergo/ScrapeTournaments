@@ -1,4 +1,3 @@
-import os
 from time import sleep
 import random
 from bs4 import BeautifulSoup
@@ -9,26 +8,27 @@ import googlemaps
 import csv
 import os
 
-
 gmaps = googlemaps.Client(os.getenv('GMAP_API_KEY'))
 geocodes = {}
 info_window_dict = {}
+tournaments = []
+browser = webdriver.Safari()
+
 
 def rand_sleep(avg, plus_or_minus):
-    sleep4 = avg + 2*plus_or_minus*random.uniform(0, 1) - plus_or_minus
+    sleep4 = avg + 2 * plus_or_minus * random.uniform(0, 1) - plus_or_minus
     sleep(sleep4)
 
 
 # Create the info_window text
-def create_info_window(tournaments):
+def create_info_window():
     for t in tournaments:
         # Initialize all by indicating they are not to be deleted
         t['tbd'] = False
 
     for t in tournaments:
-        iw = '<p>' + t['name'] + "<br />" + t['date'] + "<br />" + '<a href=https://www.' + t['web_source'] + '.com ' + \
-                          'target=' + '"' + '_blank' + '">' + t['web_source'] + '</a>' + \
-                           '<br />' + t['tournament_state'] + '</p>'
+        iw = '<p>' + t['name'] + "<br />" + t['date'] + "<br />" + t['tournament_href'] + \
+             '<br />' + t['tournament_state'] + '</p>'
         # Now, check to see if we already processed a tournament with this address
         if t['formatted_address'] in info_window_dict:
             # First, remove the previous tournament so we don't get two pins
@@ -56,6 +56,7 @@ def create_info_window(tournaments):
             tournaments.remove(t)
     return
 
+
 # Reads in all of the geocode results from past searches.
 def read_geocodes():
     reader = csv.DictReader(open('Geocode_cache.csv'))
@@ -75,9 +76,8 @@ def my_geocode(location):
         geodata = []
         geo = {'formatted_address': geocodes[location]['formatted_address'],
                'geometry': {'location':
-                                       {'lat': geocodes[location]['lat'],
-                                       'lng': geocodes[location]['lng']}
-                            }
+                            {'lat': geocodes[location]['lat'], 'lng': geocodes[location]['lng']}
+                           }
                }
 
         geodata.append(geo)
@@ -89,10 +89,10 @@ def my_geocode(location):
         try:
             with open('Geocode_cache.csv', 'a+', newline='') as csvfile:
                 writer = csv.DictWriter(csvfile, fieldnames=['unformatted_address', 'formatted_address', 'lat', 'lng'])
-                row = { 'unformatted_address': location,
-                      'formatted_address': geodata[0]['formatted_address'],
-                      'lat': geodata[0]['geometry']['location']['lat'],
-                      'lng': geodata[0]['geometry']['location']['lng']}
+                row = {'unformatted_address': location,
+                       'formatted_address': geodata[0]['formatted_address'],
+                       'lat': geodata[0]['geometry']['location']['lat'],
+                       'lng': geodata[0]['geometry']['location']['lng']}
                 writer.writerow(row)
                 csvfile.close()
         except IOError:
@@ -100,9 +100,9 @@ def my_geocode(location):
     return geodata
 
 
-def write_tournaments(tournaments, csv_file):
+def write_tournaments(csv_file):
     csv_columns = ['name', 'date', 'unformatted_address', 'formatted_address', 'lat', 'lng', 'web_source',
-                   'info_window', 'tournament_state', 'tbd']
+                   'info_window', 'tournament_state', 'tournament_href', 'tbd']
     # Now write the csv file so we don't need to do all that work every time
     try:
         with open(csv_file, 'w') as csvfile:
@@ -113,42 +113,10 @@ def write_tournaments(tournaments, csv_file):
         print("I/O error")
     return
 
-def get_tournaments():
-    # Get cached geocoding results
-    read_geocodes()
 
-    # The following block of code is useful during debugging. After an initial scrape, the list of tournaments can
-    # be written out to a file that is read in during subsequent debugging sessions, eliminating the need for
-    # time consuming scrapes
-
-    # csv_file = "Tournaments1.csv"
-    # csv_columns = ['name', 'date', 'unformatted_address', 'formatted_address', 'lat', 'lng', 'web_source',
-    #                'info_window', 'tournament_state', 'tbd']
-    # tournaments = []
-    #
-    # # If the file exists, read in the contents and return them
-    # if exists(csv_file):
-    #     input_file = csv.DictReader(open(csv_file))
-    #     # Convert strings to floats for lat/lng
-    #     for row in input_file:
-    #         row['lat'] = float(row['lat'])
-    #         row['lng'] = float(row['lng'])
-    #         tournaments.append(row)
-    #     create_info_window(tournaments)  # Create the info_window text
-    #     write_tournaments(tournaments, 'Tournaments.csv')
-    #     return tournaments
-    # else:
-    #     print(csv_file, ' not found')
-
-    # This routine scrapes PickleballBrackets.com and PickleballBrackets.com creates a list of tournaments
-    # Each tournament is a dictionary
-    # The tournaments are written to a csv file
-
-    tournaments = []
-
+def scrape_pb_tournaments():
     # Scrape PickleballTournaments.com
     # Do the actual web scraping using Selenium and BeautifulSoup
-    browser = webdriver.Safari()
     browser.get('https://www.pickleballtournaments.com')
     rand_sleep(7, 2)
 
@@ -187,9 +155,14 @@ def get_tournaments():
             soon_date = row.find("p", class_="soon-date").text
             tournament_state = 'Registration ' + soon_date
         if row.find("p", class_="open") is not None:
-            reg_link = row.find("p", class_="open").find("a").text
             tournament_state = 'Registration is open'
 
+        details_button = row.find('p', class_='detailsbutton')
+        href = details_button.find('a')['href']
+        tournament_url = 'https://www.pickleballtournaments.com/' + href
+
+        tournament_href = '<a href="' + tournament_url + '" target="_blank">' + 'Tournament Details' + '</a>'
+        # https: // www.pickleballtournaments.com / tournamentinfo.pl?tid = 5308
         if len(geodata) > 0:
             tournament_dict = {
                 'name': name,
@@ -201,12 +174,16 @@ def get_tournaments():
                 'web_source': 'PickleballTournaments',
                 'info_window': '',
                 'tournament_state': tournament_state,
+                'tournament_href': tournament_href,
                 'tbd': False
             }
             tournaments.append(tournament_dict)
         else:
             print('Geocode failed with location = ', location)
+    return
 
+
+def scrape_pb_brackets():
     browser.get('https://pickleballbrackets.com')
 
     # Keep clicking the "See more" button until we don't find a "btnMoreResults" button
@@ -230,12 +207,13 @@ def get_tournaments():
     # At this point, the web page should have all the tournaments listed
     soup = BeautifulSoup(browser.page_source, 'lxml')
 
-    for brb in soup.find_all("div", class_="browse-row-box"):
-        date = brb.find("div", class_="browse-date").text
-        name = brb.find("div", class_="browse-heading").text
+    # browse_row refers to class browse-row-box, the container div for a tournament in PickleballBrackets.com
+    for browse_row in soup.find_all("div", class_="browse-row"):
+        date = browse_row.find("div", class_="browse-date").text
+        name = browse_row.find("div", class_="browse-heading").text
 
         # get_text(separator=" ").strip() replaces <br> with " "
-        location = brb.find("div", class_="browse-location").get_text(separator=" ").strip()
+        location = browse_row.find("div", class_="browse-location").get_text(separator=" ").strip()
 
         # Sometimes the location is not provided in which case print a message and skip it
         if location == ',' or location == '':
@@ -244,9 +222,16 @@ def get_tournaments():
             continue
 
         # Tournament state = "Completed", etc.
-        tournament_state = brb.find("span", class_="state").get_text()
+        tournament_state = browse_row.find("span", class_="state").get_text()
         # Get lat, lng, formatted address from Google geocode
         geodata = my_geocode(location)
+
+        # Now get the tournament id. This is used to create a link to the tournament page
+        foo = browse_row.find('div', class_='browse-row-inner flex')
+        onclick = foo.get('onclick')
+        tournament_id = onclick.split("'")[1]
+        tournament_href = '<a href="https://www.PickleballBrackets.com/ptd.aspx?eid=' + tournament_id + '" ' + \
+                          'target="_blank">' + 'Tournament Details' + '</a>'
 
         if len(geodata) > 0:
             tournament_dict = {
@@ -259,14 +244,52 @@ def get_tournaments():
                 'web_source': 'PickleballBrackets',
                 'info_window': '',
                 'tournament_state': tournament_state,
+                'tournament_href': tournament_href,
                 'tbd': False
             }
             tournaments.append(tournament_dict)
         else:
             print('Geocode failed with location = ', location)
+    return
+
+
+def get_tournaments():
+    # Get cached geocoding results
+    read_geocodes()
+
+    # The following block of code is useful during debugging. After an initial scrape, the list of tournaments can
+    # be written out to a file that is read in during subsequent debugging sessions, eliminating the need for
+    # time consuming scrapes
+
+    # csv_file = "Tournaments1.csv"
+    # csv_columns = ['name', 'date', 'unformatted_address', 'formatted_address', 'lat', 'lng', 'web_source',
+    #                'info_window', 'tournament_state', 'tbd']
+    # tournaments = []
+    #
+    # # If the file exists, read in the contents and return them
+    # if exists(csv_file):
+    #     input_file = csv.DictReader(open(csv_file))
+    #     # Convert strings to floats for lat/lng
+    #     for row in input_file:
+    #         row['lat'] = float(row['lat'])
+    #         row['lng'] = float(row['lng'])
+    #         tournaments.append(row)
+    #     create_info_window(tournaments)  # Create the info_window text
+    #     write_tournaments(tournaments, 'Tournaments.csv')
+    #     return tournaments
+    # else:
+    #     print(csv_file, ' not found')
+
+    # This routine scrapes PickleballBrackets.com and PickleballBrackets.com creates a list of tournaments
+    # Each tournament is a dictionary
+    # The tournaments are written to a csv file
+
+    scrape_pb_tournaments()
+    scrape_pb_brackets()
+
     # The following line of code is useful during debugging and should be uncommented in conjunction with the block of
     # code at the top of this routine
-    # write_tournaments(tournaments, 'Tournaments1.csv')
+    # write_tournaments('Tournaments1.csv')
 
     # Handle known exceptions
     for t in tournaments:
@@ -277,7 +300,7 @@ def get_tournaments():
             t['lng'] = geodata[0]["geometry"]["location"]["lng"]
             t['formatted_address'] = geodata[0]["formatted_address"]
 
-    create_info_window(tournaments)  # Create the info_window text
-    write_tournaments(tournaments, 'Tournaments.csv')
+    create_info_window()  # Create the info_window text
+    write_tournaments('Tournaments.csv')
 
     return
