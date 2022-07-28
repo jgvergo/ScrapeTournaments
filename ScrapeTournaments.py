@@ -15,6 +15,24 @@ tournaments = []
 browser = webdriver.Safari()
 
 
+def handle_known_address_exceptions(name):
+    # "Manually" handle known exceptions where no location was provided in the "normal" manner but can be
+    # found elsewhere on the site
+    if name == 'Naples Pickleball Fun Festival 50+ Round Robin Tournament':
+        print("Handled address exception: ", name)
+        return 'East Naples Community Park, Naples, FL, United States'
+
+    if name == '2022 Fall Classic @  Gilbert Regional by PIG - a USSP Circuit event':
+        print("Handled address exception: ", name)
+        return 'Gilbert Regional Park 3005 E Queen Creek Rd Gilbert Arizona 85298 United States'
+
+    if name == '2022 Winter Classic @  Gilbert Regional by PIG - a USSP Circuit event':
+        print("Handled address exception: ", name)
+        return 'Gilbert Regional Park 3005 E Queen Creek Rd Gilbert Arizona 85298 United States'
+
+    return ""
+
+
 def rand_sleep(avg, plus_or_minus):
     sleep4 = avg + 2 * plus_or_minus * random.uniform(0, 1) - plus_or_minus
     sleep(sleep4)
@@ -76,8 +94,8 @@ def my_geocode(location):
         geodata = []
         geo = {'formatted_address': geocodes[location]['formatted_address'],
                'geometry': {'location':
-                            {'lat': geocodes[location]['lat'], 'lng': geocodes[location]['lng']}
-                           }
+                                {'lat': geocodes[location]['lat'], 'lng': geocodes[location]['lng']}
+                            }
                }
 
         geodata.append(geo)
@@ -118,7 +136,7 @@ def scrape_pb_tournaments():
     # Scrape PickleballTournaments.com
     # Do the actual web scraping using Selenium and BeautifulSoup
     browser.get('https://www.pickleballtournaments.com')
-    rand_sleep(7, 2)
+    rand_sleep(3, 2)
 
     try:
         # Navigate to the "Future Tournaments" page. NB: Need to use browser.execute_script b/c the web element
@@ -129,7 +147,7 @@ def scrape_pb_tournaments():
         print('Unexpected exception')
     except NoSuchElementException:
         print('Unexpected exception')
-    rand_sleep(7, 2)
+    rand_sleep(3, 2)
 
     # At this point, the web page should have all the future tournaments listed
     soup = BeautifulSoup(browser.page_source, 'lxml')
@@ -140,9 +158,11 @@ def scrape_pb_tournaments():
         location = row.p.text
         # Sometimes the location is not provided in which case print a message and skip it
         if location == ',' or location == '':
-            ostr = name + 'has no location' + location
-            print(ostr)
-            continue
+            location = handle_known_address_exceptions(name)
+            if location == "":
+                ostr = name + ' has no location. ADD TO EXCEPTION LIST'
+                print(ostr)
+                continue
         tl_date = row.find("p", class_="tourney-date")
         date = tl_date.text.strip()  # strip removes \nl
 
@@ -151,12 +171,13 @@ def scrape_pb_tournaments():
 
         if row.find("p", class_="closed") is not None:
             tournament_state = 'Registration is closed'
-        if row.find("p", class_="soon-date") is not None:
+        elif row.find("p", class_="soon-date") is not None:
             soon_date = row.find("p", class_="soon-date").text
             tournament_state = 'Registration ' + soon_date
-        if row.find("p", class_="open") is not None:
+        elif row.find("p", class_="open") is not None:
             tournament_state = 'Registration is open'
-
+        elif row.find("p", class_="adonly") is not None:
+            tournament_state = 'Tournament Advertisement Only'
         details_button = row.find('p', class_='detailsbutton')
         href = details_button.find('a')['href']
         tournament_url = 'https://www.pickleballtournaments.com/' + href
@@ -217,9 +238,11 @@ def scrape_pb_brackets():
 
         # Sometimes the location is not provided in which case print a message and skip it
         if location == ',' or location == '':
-            ostr = name + 'has no location' + location
-            print(ostr)
-            continue
+            location = handle_known_address_exceptions(name)
+            if location == "":
+                ostr = name + ' has no location. ADD TO EXCEPTION LIST'
+                print(ostr)
+                continue
 
         # Tournament state = "Completed", etc.
         tournament_state = browse_row.find("span", class_="state").get_text()
@@ -290,15 +313,6 @@ def get_tournaments():
     # The following line of code is useful during debugging and should be uncommented in conjunction with the block of
     # code at the top of this routine
     # write_tournaments('Tournaments1.csv')
-
-    # Handle known exceptions
-    for t in tournaments:
-        if t['name'] == 'Naples Pickleball Fun Festival 50+ Round Robin Tournament':
-            t['unformatted_address'] = 'East Naples Community Park, Naples, FL, United States'
-            geodata = my_geocode(t['unformatted_address'])
-            t['lat'] = geodata[0]["geometry"]["location"]["lat"]
-            t['lng'] = geodata[0]["geometry"]["location"]["lng"]
-            t['formatted_address'] = geodata[0]["formatted_address"]
 
     create_info_window()  # Create the info_window text
     write_tournaments('Tournaments.csv')
