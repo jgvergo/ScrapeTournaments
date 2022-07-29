@@ -41,18 +41,20 @@ def rand_sleep(avg, plus_or_minus):
 # Create the info_window text
 def create_info_window():
     for t in tournaments:
-        # Initialize all by indicating they are not to be deleted
+        # Initialize all by indicating they are not to be deleted ("tbd")
         t['tbd'] = False
 
     for t in tournaments:
+        # Create the content for the info window
         iw = '<p>' + t['name'] + "<br />" + t['date'] + "<br />" + t['tournament_href'] + \
              '<br />' + t['tournament_state'] + '</p>'
+
         # Now, check to see if we already processed a tournament with this address
         if t['formatted_address'] in info_window_dict:
             # First, remove the previous tournament so we don't get two pins
             for ot in tournaments:
                 if ot['formatted_address'] == t['formatted_address']:
-                    # If it's already been marked for deletion, find the next one
+                    # If it's already been marked for deletion, find the next one.
                     if ot['tbd']:
                         continue
                     else:
