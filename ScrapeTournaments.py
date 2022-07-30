@@ -7,12 +7,51 @@ from selenium.webdriver.common.by import By
 import googlemaps
 import csv
 import os
+from os.path import exists
+from datetime import datetime, timedelta
 
 gmaps = googlemaps.Client(os.getenv('GMAP_API_KEY'))
 geocodes = {}
 info_window_dict = {}
 tournaments = []
 browser = webdriver.Safari()
+
+
+# Read in the old tournaments file
+def read_tournament_file(csv_file):
+    # The following block of code is useful during debugging. After an initial scrape, the list of tournaments can
+    # be written out to a file that is read in during subsequent debugging sessions, eliminating the need for
+    # time consuming scrapes
+
+    old_tournaments = []
+
+    # If the file exists, read in the contents and return them
+    if exists(csv_file):
+        input_file = csv.DictReader(open(csv_file))
+        # Convert strings to floats for lat/lng
+        # Convert dates
+        for row in input_file:
+            row['lat'] = float(row['lat'])
+            row['lng'] = float(row['lng'])
+            row['original_scrape_date'] = datetime.strptime(row['original_scrape_date'], '%m/%d/%y')
+            old_tournaments.append(row)
+        return old_tournaments
+    else:
+        raise RuntimeError("Could not find " + csv_file)
+
+
+# This function returns two filenames, one associated with "today" (the date when ScrapeTournaments is run
+# and one associated with the most recent run of ScrapeTournaments
+def get_tournament_files():
+    currentfilename =  datetime.today().strftime('%m-%d-%y') + "Tournaments.csv"
+    for x in range(10):
+        pastday = datetime.today() - timedelta(x)
+        pastdate = datetime.strftime(pastday, '%m-%d-%y')
+        pastfilename = pastdate+"Tournaments.csv"
+        if exists(pastfilename):
+            return pastfilename, currentfilename
+
+    raise RuntimeError("Could not find a recently stored MM-DD-YYTournaments.csv file")
 
 
 def handle_known_address_exceptions(name):
@@ -122,7 +161,8 @@ def my_geocode(location):
 
 def write_tournaments(csv_file):
     csv_columns = ['name', 'date', 'unformatted_address', 'formatted_address', 'lat', 'lng', 'web_source',
-                   'info_window', 'tournament_state', 'tournament_href', 'tbd']
+                   'info_window', 'tournament_state', 'tournament_href', 'tbd', 'original_scrape_date',
+                   'days_since_scrape']
     # Now write the csv file so we don't need to do all that work every time
     try:
         with open(csv_file, 'w') as csvfile:
@@ -198,7 +238,8 @@ def scrape_pb_tournaments():
                 'info_window': '',
                 'tournament_state': tournament_state,
                 'tournament_href': tournament_href,
-                'tbd': False
+                'tbd': False,
+                'original_scrape_date': datetime.today()
             }
             tournaments.append(tournament_dict)
         else:
@@ -270,7 +311,8 @@ def scrape_pb_brackets():
                 'info_window': '',
                 'tournament_state': tournament_state,
                 'tournament_href': tournament_href,
-                'tbd': False
+                'tbd': False,
+                'original_scrape_date': datetime.today()
             }
             tournaments.append(tournament_dict)
         else:
@@ -282,41 +324,47 @@ def get_tournaments():
     # Get cached geocoding results
     read_geocodes()
 
-    # The following block of code is useful during debugging. After an initial scrape, the list of tournaments can
-    # be written out to a file that is read in during subsequent debugging sessions, eliminating the need for
-    # time consuming scrapes
-
-    # csv_file = "Tournaments1.csv"
-    # csv_columns = ['name', 'date', 'unformatted_address', 'formatted_address', 'lat', 'lng', 'web_source',
-    #                'info_window', 'tournament_state', 'tbd']
-    # tournaments = []
-    #
-    # # If the file exists, read in the contents and return them
-    # if exists(csv_file):
-    #     input_file = csv.DictReader(open(csv_file))
-    #     # Convert strings to floats for lat/lng
-    #     for row in input_file:
-    #         row['lat'] = float(row['lat'])
-    #         row['lng'] = float(row['lng'])
-    #         tournaments.append(row)
-    #     create_info_window(tournaments)  # Create the info_window text
-    #     write_tournaments(tournaments, 'Tournaments.csv')
-    #     return tournaments
-    # else:
-    #     print(csv_file, ' not found')
-
     # This routine scrapes PickleballBrackets.com and PickleballBrackets.com creates a list of tournaments
     # Each tournament is a dictionary
     # The tournaments are written to a csv file
 
+    # The "core" of the process...scrape sites and build the info_windows that pop up when a user
+    # clicks on a pin
     scrape_pb_tournaments()
     scrape_pb_brackets()
-
-    # The following line of code is useful during debugging and should be uncommented in conjunction with the block of
-    # code at the top of this routine
-    # write_tournaments('Tournaments1.csv')
-
     create_info_window()  # Create the info_window text
-    write_tournaments('Tournaments.csv')
+
+    # Now we handle "recent additions" to the map
+    # The old tournament file has a column called "original_scrape_date"
+    # Go through the new set of tournaments, see if it's in the old file and if it is, copy its
+    # original_scrape_date.
+    # Note: this has the effect of 1) Dropping tournaments that are no longer on the scraped sites and
+    # 2) Always have a record of when a tournament was first scraped.
+    # NB: The first time this was implemented was on 7/30/22. The "old" file was manually filled with
+    # an original_scrape_date of 2022-07-28.
+
+    pastfilename, currentfilename = get_tournament_files()
+    old_tournaments = read_tournament_file(pastfilename)
+    for t in tournaments:
+        # Start by assuming it was scraped today
+        t['original_scrape_date'] = datetime.today().date()
+        t['days_since_scrape'] = 0
+
+        # See if this tournament existed in the most recent tournament file
+        for old_t in old_tournaments:
+            if t['tournament_href'] not in old_t['info_window']:
+                continue
+            else:
+                # If we find it in the old info_window, then assign the actual scrape date
+                t['original_scrape_date'] = old_t['original_scrape_date'].date()
+                d0 = datetime.today()
+                d1 = old_t['original_scrape_date']
+                delta = d0 - d1
+                t['days_since_scrape'] = delta.days
+                break
+
+    write_tournaments(currentfilename)
+    # For convenience, write it a second time to the application directory
+    write_tournaments("../PickleballMaps/Tournaments.csv")
 
     return
